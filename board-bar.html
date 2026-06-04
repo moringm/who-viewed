@@ -182,8 +182,12 @@
     }
 
     var currentMember = null;
+    var rendered = false;
 
     t.render(async function() {
+      if (rendered) return;
+      rendered = true;
+
       const member = await t.member('id', 'fullName', 'initials', 'avatar');
       currentMember = member;
       await writePresence(t, member);
