@@ -19,7 +19,7 @@
     #viewers {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
       flex-wrap: nowrap;
       overflow-x: auto;
       width: 100%;
@@ -37,16 +37,16 @@
     }
 
     .avatar {
-      width: 28px;
-      height: 28px;
+      width: 30px;
+      height: 30px;
       border-radius: 50%;
       object-fit: cover;
       flex-shrink: 0;
     }
 
     .initials {
-      width: 28px;
-      height: 28px;
+      width: 30px;
+      height: 30px;
       border-radius: 50%;
       background: #0052CC;
       color: #fff;
@@ -58,16 +58,23 @@
       flex-shrink: 0;
     }
 
+    .info {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
     .name {
       font-size: 13px;
       color: #172b4d;
       white-space: nowrap;
+      font-weight: 500;
     }
 
-    .you-badge {
+    .last-seen {
       font-size: 10px;
       color: #5e6c84;
-      margin-left: 2px;
+      white-space: nowrap;
     }
 
     #empty {
@@ -77,10 +84,10 @@
   </style>
 </head>
 <body>
-  <div id="viewers"><div id="empty" style="display:none">No one else is viewing right now.</div></div>
+  <div id="viewers"><div id="empty" style="display:none">No viewers recorded yet.</div></div>
 
   <script>
-    const PRESENCE_TTL = 2 * 60 * 1000;
+    const SIX_MONTHS = 6 * 30 * 24 * 60 * 60 * 1000;
 
     var t = TrelloPowerUp.iframe();
 
@@ -97,33 +104,42 @@
       });
     }
 
-    function getActiveViewers(all) {
+    function getAllViewers(all) {
       const shared = (all.board && all.board.shared) ? all.board.shared : {};
       const now = Date.now();
       return Object.entries(shared)
-        .filter(([k, v]) => k.startsWith('presence_') && v && (now - v.ts) < PRESENCE_TTL)
-        .map(([k, v]) => ({ id: k.replace('presence_', ''), ...v }));
+        .filter(([k, v]) => k.startsWith('presence_') && v && (now - v.ts) < SIX_MONTHS)
+        .map(([k, v]) => ({ id: k.replace('presence_', ''), ...v }))
+        .sort((a, b) => b.ts - a.ts); // most recent first
+    }
+
+    function timeAgo(ts) {
+      const diff = Date.now() - ts;
+      const minutes = Math.floor(diff / 60000);
+      const hours   = Math.floor(diff / 3600000);
+      const days    = Math.floor(diff / 86400000);
+      const weeks   = Math.floor(days / 7);
+      const months  = Math.floor(days / 30);
+
+      if (minutes < 2)   return 'just now';
+      if (minutes < 60)  return minutes + 'm ago';
+      if (hours < 24)    return hours + 'h ago';
+      if (days < 7)      return days + 'd ago';
+      if (weeks < 5)     return weeks + 'w ago';
+      return months + 'mo ago';
     }
 
     function renderViewers(viewers, currentMemberId) {
       const container = document.getElementById('viewers');
       const empty = document.getElementById('empty');
 
+      Array.from(container.querySelectorAll('.viewer')).forEach(el => el.remove());
+
       if (viewers.length === 0) {
         empty.style.display = '';
         return;
       }
       empty.style.display = 'none';
-
-      // Sort: current user first, then alphabetical
-      viewers.sort((a, b) => {
-        if (a.id === currentMemberId) return -1;
-        if (b.id === currentMemberId) return 1;
-        return a.name.localeCompare(b.name);
-      });
-
-      // Remove old chips (keep the empty div)
-      Array.from(container.querySelectorAll('.viewer')).forEach(el => el.remove());
 
       viewers.forEach(v => {
         const chip = document.createElement('div');
@@ -140,18 +156,20 @@
           chip.appendChild(makeInitials(v.initials));
         }
 
+        const info = document.createElement('div');
+        info.className = 'info';
+
         const name = document.createElement('span');
         name.className = 'name';
-        name.textContent = v.name;
-        chip.appendChild(name);
+        name.textContent = v.id === currentMemberId ? v.name + ' (you)' : v.name;
+        info.appendChild(name);
 
-        if (v.id === currentMemberId) {
-          const badge = document.createElement('span');
-          badge.className = 'you-badge';
-          badge.textContent = '(you)';
-          chip.appendChild(badge);
-        }
+        const lastSeen = document.createElement('span');
+        lastSeen.className = 'last-seen';
+        lastSeen.textContent = timeAgo(v.ts);
+        info.appendChild(lastSeen);
 
+        chip.appendChild(info);
         container.appendChild(chip);
       });
     }
@@ -165,26 +183,12 @@
 
     var currentMember = null;
 
-    async function refresh() {
-      const [member, all] = await Promise.all([
-        currentMember ? Promise.resolve(currentMember) : t.member('id', 'fullName', 'initials', 'avatar'),
-        t.getAll()
-      ]);
-      if (!currentMember) {
-        currentMember = member;
-        await writePresence(t, member);
-      }
-      renderViewers(getActiveViewers(all), member.id);
-    }
-
     t.render(async function() {
       const member = await t.member('id', 'fullName', 'initials', 'avatar');
       currentMember = member;
       await writePresence(t, member);
       const all = await t.getAll();
-      renderViewers(getActiveViewers(all), member.id);
-
-      setInterval(refresh, 45000);
+      renderViewers(getAllViewers(all), member.id);
     });
   </script>
 </body>
