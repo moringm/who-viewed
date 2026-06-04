@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="https://p.trellocdn.com/power-up.min.js"></script>
+  <script>
+    const PRESENCE_TTL = 2 * 60 * 1000; // 2 minutes
+
+    function presenceKey(memberId) {
+      return 'presence_' + memberId;
+    }
+
+    async function writePresence(t) {
+      const member = await t.member('id', 'fullName', 'initials', 'avatar');
+      await t.set('board', 'shared', presenceKey(member.id), {
+        ts: Date.now(),
+        name: member.fullName,
+        initials: member.initials,
+        avatar: member.avatar
+      });
+    }
+
+    async function getActiveViewers(t) {
+      const all = await t.getAll();
+      const shared = (all.board && all.board.shared) ? all.board.shared : {};
+      const now = Date.now();
+      return Object.entries(shared)
+        .filter(([k, v]) => k.startsWith('presence_') && v && (now - v.ts) < PRESENCE_TTL)
+        .map(([k, v]) => ({ id: k.replace('presence_', ''), ...v }));
+    }
+
+    TrelloPowerUp.initialize({
+      'board-buttons': function(t) {
+        return writePresence(t)
+          .then(() => getActiveViewers(t))
+          .then(viewers => [{
+            icon: {
+              dark: window.location.origin + window.location.pathname.replace('index.html', '') + 'icon.svg',
+              light: window.location.origin + window.location.pathname.replace('index.html', '') + 'icon.svg'
+            },
+            text: viewers.length === 1 ? '1 viewing' : viewers.length + ' viewing',
+            callback: function(t) {
+              return t.boardBar({
+                url: t.signUrl('./board-bar.html'),
+                height: 64,
+                accentColor: '#0052CC',
+                title: "Who's Viewing"
+              });
+            }
+          }]);
+      }
+    });
+  </script>
+</head>
+<body></body>
+</html>

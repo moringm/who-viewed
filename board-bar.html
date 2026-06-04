@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="https://p.trellocdn.com/power-up.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #fff;
+      display: flex;
+      align-items: center;
+      height: 100%;
+      padding: 0 16px;
+      overflow: hidden;
+    }
+
+    #viewers {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      width: 100%;
+      padding: 8px 0;
+    }
+
+    .viewer {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+      background: #f4f5f7;
+      border-radius: 20px;
+      padding: 4px 10px 4px 4px;
+    }
+
+    .avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      object-fit: cover;
+      flex-shrink: 0;
+    }
+
+    .initials {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: #0052CC;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .name {
+      font-size: 13px;
+      color: #172b4d;
+      white-space: nowrap;
+    }
+
+    .you-badge {
+      font-size: 10px;
+      color: #5e6c84;
+      margin-left: 2px;
+    }
+
+    #empty {
+      color: #5e6c84;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div id="viewers"><div id="empty" style="display:none">No one else is viewing right now.</div></div>
+
+  <script>
+    const PRESENCE_TTL = 2 * 60 * 1000;
+
+    var t = TrelloPowerUp.iframe();
+
+    function presenceKey(memberId) {
+      return 'presence_' + memberId;
+    }
+
+    async function writePresence(t, member) {
+      await t.set('board', 'shared', presenceKey(member.id), {
+        ts: Date.now(),
+        name: member.fullName,
+        initials: member.initials,
+        avatar: member.avatar
+      });
+    }
+
+    function getActiveViewers(all) {
+      const shared = (all.board && all.board.shared) ? all.board.shared : {};
+      const now = Date.now();
+      return Object.entries(shared)
+        .filter(([k, v]) => k.startsWith('presence_') && v && (now - v.ts) < PRESENCE_TTL)
+        .map(([k, v]) => ({ id: k.replace('presence_', ''), ...v }));
+    }
+
+    function renderViewers(viewers, currentMemberId) {
+      const container = document.getElementById('viewers');
+      const empty = document.getElementById('empty');
+
+      if (viewers.length === 0) {
+        empty.style.display = '';
+        return;
+      }
+      empty.style.display = 'none';
+
+      // Sort: current user first, then alphabetical
+      viewers.sort((a, b) => {
+        if (a.id === currentMemberId) return -1;
+        if (b.id === currentMemberId) return 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      // Remove old chips (keep the empty div)
+      Array.from(container.querySelectorAll('.viewer')).forEach(el => el.remove());
+
+      viewers.forEach(v => {
+        const chip = document.createElement('div');
+        chip.className = 'viewer';
+
+        if (v.avatar) {
+          const img = document.createElement('img');
+          img.className = 'avatar';
+          img.src = v.avatar + '/30.png';
+          img.alt = v.initials;
+          img.onerror = () => img.replaceWith(makeInitials(v.initials));
+          chip.appendChild(img);
+        } else {
+          chip.appendChild(makeInitials(v.initials));
+        }
+
+        const name = document.createElement('span');
+        name.className = 'name';
+        name.textContent = v.name;
+        chip.appendChild(name);
+
+        if (v.id === currentMemberId) {
+          const badge = document.createElement('span');
+          badge.className = 'you-badge';
+          badge.textContent = '(you)';
+          chip.appendChild(badge);
+        }
+
+        container.appendChild(chip);
+      });
+    }
+
+    function makeInitials(text) {
+      const el = document.createElement('div');
+      el.className = 'initials';
+      el.textContent = text || '?';
+      return el;
+    }
+
+    var currentMember = null;
+
+    async function refresh() {
+      const [member, all] = await Promise.all([
+        currentMember ? Promise.resolve(currentMember) : t.member('id', 'fullName', 'initials', 'avatar'),
+        t.getAll()
+      ]);
+      if (!currentMember) {
+        currentMember = member;
+        await writePresence(t, member);
+      }
+      renderViewers(getActiveViewers(all), member.id);
+    }
+
+    t.render(async function() {
+      const member = await t.member('id', 'fullName', 'initials', 'avatar');
+      currentMember = member;
+      await writePresence(t, member);
+      const all = await t.getAll();
+      renderViewers(getActiveViewers(all), member.id);
+
+      setInterval(refresh, 45000);
+    });
+  </script>
+</body>
+</html>
